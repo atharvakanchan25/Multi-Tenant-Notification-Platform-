@@ -1,0 +1,166 @@
+{
+  "title": "Notification Service",
+  "uid": "notification-service-main",
+  "schemaVersion": 38,
+  "refresh": "10s",
+  "time": { "from": "now-30m", "to": "now" },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Sent rate — per tenant (msg/s)",
+      "type": "timeseries",
+      "gridPos": { "x": 0, "y": 0, "w": 12, "h": 8 },
+      "targets": [{
+        "datasource": "Prometheus",
+        "expr": "sum(rate(notification_sent_total[1m])) by (tenant)",
+        "legendFormat": "{{tenant}}"
+      }]
+    },
+    {
+      "id": 2,
+      "title": "Failure rate — per tenant (msg/s)",
+      "type": "timeseries",
+      "gridPos": { "x": 12, "y": 0, "w": 12, "h": 8 },
+      "targets": [{
+        "datasource": "Prometheus",
+        "expr": "sum(rate(notification_failed_total[1m])) by (tenant)",
+        "legendFormat": "{{tenant}}"
+      }]
+    },
+    {
+      "id": 3,
+      "title": "Provider error rate (msg/s)",
+      "type": "timeseries",
+      "gridPos": { "x": 0, "y": 8, "w": 12, "h": 8 },
+      "targets": [{
+        "datasource": "Prometheus",
+        "expr": "sum(rate(notification_failed_total[1m])) by (provider)",
+        "legendFormat": "{{provider}}"
+      }]
+    },
+    {
+      "id": 4,
+      "title": "DLQ depth (live gauge)",
+      "type": "stat",
+      "gridPos": { "x": 12, "y": 8, "w": 6, "h": 8 },
+      "targets": [{
+        "datasource": "Prometheus",
+        "expr": "notification_dlq_depth",
+        "legendFormat": "DLQ depth"
+      }],
+      "options": {
+        "colorMode": "background",
+        "thresholds": {
+          "mode": "absolute",
+          "steps": [
+            { "color": "green", "value": 0 },
+            { "color": "yellow", "value": 10 },
+            { "color": "red", "value": 100 }
+          ]
+        }
+      }
+    },
+    {
+      "id": 5,
+      "title": "DLQ publish rate (msg/s)",
+      "type": "timeseries",
+      "gridPos": { "x": 18, "y": 8, "w": 6, "h": 8 },
+      "targets": [{
+        "datasource": "Prometheus",
+        "expr": "sum(rate(notification_dlq_total[1m])) by (tenant)",
+        "legendFormat": "{{tenant}}"
+      }]
+    },
+    {
+      "id": 6,
+      "title": "Provider failover events (cumulative)",
+      "type": "stat",
+      "gridPos": { "x": 0, "y": 16, "w": 8, "h": 6 },
+      "targets": [{
+        "datasource": "Prometheus",
+        "expr": "sum(notification_failover_total) by (from_provider, to_provider)",
+        "legendFormat": "{{from_provider}} → {{to_provider}}"
+      }]
+    },
+    {
+      "id": 7,
+      "title": "Suppressed (opt-out) rate (msg/s)",
+      "type": "timeseries",
+      "gridPos": { "x": 8, "y": 16, "w": 8, "h": 6 },
+      "targets": [{
+        "datasource": "Prometheus",
+        "expr": "sum(rate(notification_suppressed_total[1m])) by (tenant, channel)",
+        "legendFormat": "{{tenant}}/{{channel}}"
+      }]
+    },
+    {
+      "id": 8,
+      "title": "PAID vs FREE throughput — fairness proof (msg/s)",
+      "type": "timeseries",
+      "description": "Key portfolio graph: PAID line must stay flat when FREE noisy burst fires at t=60s",
+      "gridPos": { "x": 16, "y": 16, "w": 8, "h": 6 },
+      "targets": [
+        {
+          "datasource": "Prometheus",
+          "expr": "sum(rate(notification_sent_total{tenant=~\"tenant-paid.*\"}[1m]))",
+          "legendFormat": "PAID tier"
+        },
+        {
+          "datasource": "Prometheus",
+          "expr": "sum(rate(notification_sent_total{tenant=~\"tenant-free.*\"}[1m]))",
+          "legendFormat": "FREE tier"
+        }
+      ]
+    },
+    {
+      "id": 9,
+      "title": "Dispatch latency p50 / p95 / p99 (ms)",
+      "type": "timeseries",
+      "description": "Sourced from notification_dispatch_seconds histogram",
+      "gridPos": { "x": 0, "y": 22, "w": 12, "h": 8 },
+      "targets": [
+        {
+          "datasource": "Prometheus",
+          "expr": "histogram_quantile(0.50, sum(rate(notification_dispatch_seconds_bucket[1m])) by (le))",
+          "legendFormat": "p50"
+        },
+        {
+          "datasource": "Prometheus",
+          "expr": "histogram_quantile(0.95, sum(rate(notification_dispatch_seconds_bucket[1m])) by (le))",
+          "legendFormat": "p95"
+        },
+        {
+          "datasource": "Prometheus",
+          "expr": "histogram_quantile(0.99, sum(rate(notification_dispatch_seconds_bucket[1m])) by (le))",
+          "legendFormat": "p99"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "ms" }
+      }
+    },
+    {
+      "id": 10,
+      "title": "Circuit breaker state — providerSend",
+      "type": "stat",
+      "gridPos": { "x": 12, "y": 22, "w": 6, "h": 8 },
+      "targets": [{
+        "datasource": "Prometheus",
+        "expr": "resilience4j_circuitbreaker_state{name=\"providerSend\"}",
+        "legendFormat": "{{state}}"
+      }]
+    },
+    {
+      "id": 11,
+      "title": "Rate-limit nacks — throttled tenants (nacks/s)",
+      "type": "timeseries",
+      "description": "Spikes here during FREE burst confirm the rate limiter is working",
+      "gridPos": { "x": 18, "y": 22, "w": 6, "h": 8 },
+      "targets": [{
+        "datasource": "Prometheus",
+        "expr": "sum(rate(spring_kafka_listener_seconds_count{result=\"failure\"}[1m])) by (name)",
+        "legendFormat": "{{name}}"
+      }]
+    }
+  ]
+}

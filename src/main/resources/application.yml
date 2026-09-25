@@ -1,0 +1,104 @@
+spring:
+  datasource:
+    url: jdbc:postgresql://${DB_HOST:localhost}:5432/${DB_NAME:notifications}
+    username: ${DB_USER:postgres}
+    password: ${DB_PASS:postgres}
+    driver-class-name: org.postgresql.Driver
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    consumer:
+      group-id: notification-consumers
+      auto-offset-reset: earliest
+      enable-auto-commit: false
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+
+aws:
+  region: ${AWS_REGION:us-east-1}
+  accessKeyId: ${AWS_ACCESS_KEY_ID:dummy}
+  secretAccessKey: ${AWS_SECRET_ACCESS_KEY:dummy}
+
+rate-limit:
+  per-window: 10
+  window-seconds: 1
+  paid-per-window: 100    # PAID tenants get 100 msg/s
+  free-per-window: 10     # FREE tenants get 10 msg/s
+
+twilio:
+  account-sid: ${TWILIO_ACCOUNT_SID:dummy-sid}
+  auth-token: ${TWILIO_AUTH_TOKEN:dummy-token}
+  from-number: ${TWILIO_FROM_NUMBER:+10000000000}
+
+webhook:
+  secret: ${WEBHOOK_SECRET:}   # blank = skip verification in local dev; set in production
+
+# ── Actuator + Prometheus ───────────────────────────────────────────────────
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus,metrics
+  metrics:
+    tags:
+      application: notification-service
+  tracing:
+    sampling:
+      probability: 1.0   # 100% sampling in dev; tune to 0.1 in prod
+
+# ── OpenTelemetry ────────────────────────────────────────────────────────────
+otel:
+  exporter:
+    otlp:
+      endpoint: ${OTEL_EXPORTER_OTLP_ENDPOINT:http://localhost:4318}
+  service:
+    name: notification-service
+  traces:
+    exporter: otlp
+  metrics:
+    exporter: none   # Prometheus scrapes Micrometer directly
+
+# ── Resilience4j ─────────────────────────────────────────────────────────────
+# Both the retry and circuit breaker share the instance name "providerSend".
+# Retry wraps the circuit breaker: each attempt goes through the CB.
+resilience4j:
+  retry:
+    instances:
+      providerSend:
+        max-attempts: 4                  # 1 original + 3 retries
+        wait-duration: 500ms             # base backoff
+        enable-exponential-backoff: true
+        exponential-backoff-multiplier: 2.0   # 500ms → 1s → 2s
+        exponential-max-wait-duration: 10s    # cap so we never wait >10s
+        randomized-wait-factor: 0.3      # ±30% jitter per attempt
+        retry-exceptions:
+          - java.io.IOException
+          - software.amazon.awssdk.core.exception.SdkClientException
+          - com.twilio.exception.ApiConnectionException
+        ignore-exceptions:
+          - java.lang.IllegalArgumentException
+          - java.lang.IllegalStateException
+
+  circuitbreaker:
+    instances:
+      providerSend:
+        sliding-window-type: COUNT_BASED
+        sliding-window-size: 20          # evaluate last 20 calls
+        failure-rate-threshold: 50       # open at 50% failure rate
+        slow-call-duration-threshold: 5s # calls >5s count as failures
+        slow-call-rate-threshold: 80     # open if 80% of calls are slow
+        wait-duration-in-open-state: 30s # wait 30s before half-open probe
+        permitted-number-of-calls-in-half-open-state: 3
+        automatic-transition-from-open-to-half-open-enabled: true
+        register-health-indicator: true
+
+server:
+  port: 8080
